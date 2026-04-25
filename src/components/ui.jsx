@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { BRAND, STATUS_COLORS, S } from '../brand'
+import { jobs } from '../api'
 
 // ── Status Badge ──
 export function StatusBadge({ status }) {
@@ -129,6 +130,145 @@ export function EmptyState({ message = 'No results' }) {
     </div>
   )
 }
+
+// ── Job Progress Modal ──
+// Polls jobs.get(id) every 2s until status is terminal (complete/failed/error),
+// shows page-by-page progress, and renders per-page results when finished.
+export function JobProgressModal({ jobId, fileName, onClose, onComplete }) {
+  const [job, setJob] = useState(null)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    if (!jobId) { setJob(null); setError(null); return }
+    let stopped = false
+    let timer
+    let completedNotified = false
+
+    async function poll() {
+      try {
+        const res = await jobs.get(jobId)
+        const row = (res.data && res.data[0]) || res.data || res
+        if (stopped) return
+        setJob(row)
+        const terminal = row && (row.status === 'complete' || row.status === 'failed' || row.status === 'error')
+        if (terminal) {
+          if (!completedNotified && onComplete) { completedNotified = true; onComplete(row) }
+          return
+        }
+        timer = setTimeout(poll, 2000)
+      } catch (err) {
+        if (stopped) return
+        setError(err.message || 'Polling failed')
+        timer = setTimeout(poll, 4000)
+      }
+    }
+    poll()
+    return () => { stopped = true; clearTimeout(timer) }
+  }, [jobId])
+
+  if (!jobId) return null
+
+  const totalPages = parseInt(job?.total_pages) || 0
+  const processed = parseInt(job?.pages_processed) || 0
+  const pct = totalPages > 0 ? Math.min(100, Math.round((processed / totalPages) * 100)) : 0
+  const status = job?.status || 'pending'
+  const isDone = status === 'complete'
+  const isError = status === 'failed' || status === 'error' || error
+  const results = Array.isArray(job?.results) ? job.results : (typeof job?.results === 'string' ? safeParse(job.results) : [])
+
+  return (
+    <Modal open={true} onClose={isDone || isError ? onClose : undefined} title={isDone ? 'Processing complete' : isError ? 'Processing failed' : 'Processing template…'} width={640}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontFamily: BRAND.mono, fontSize: 11, color: BRAND.faint, marginBottom: 4 }}>FILE</div>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>{fileName || job?.source_file_name || '—'}</div>
+        <div style={{ fontFamily: BRAND.mono, fontSize: 10, color: BRAND.faint, marginTop: 2 }}>
+          Job #{jobId} · {totalPages || '?'} page{totalPages === 1 ? '' : 's'} · {status}
+        </div>
+      </div>
+
+      {!isDone && !isError && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: BRAND.mono, fontSize: 10, color: BRAND.faint, marginBottom: 6 }}>
+            <span>{processed} / {totalPages || '?'} pages</span>
+            <span>{pct}%</span>
+          </div>
+          <div style={{ height: 6, background: BRAND.faint + '30', borderRadius: 3, overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: pct + '%', background: BRAND.terracotta, transition: 'width 0.3s' }} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, fontSize: 12, color: BRAND.muted }}>
+            <Spinner size={14} />
+            <span>{status === 'pending' ? 'Waiting to start…' : 'Analyzing pages with AI…'}</span>
+          </div>
+        </div>
+      )}
+
+      {isError && (
+        <div style={{ padding: 14, background: BRAND.red + '12', border: '1px solid ' + BRAND.red + '33', borderRadius: BRAND.radiusSm, color: BRAND.red, fontSize: 13, marginBottom: 16 }}>
+          {error || 'The job did not finish successfully. Check the n8n execution log.'}
+        </div>
+      )}
+
+      {results.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontFamily: BRAND.mono, fontSize: 11, color: BRAND.faint, marginBottom: 8 }}>
+            PAGES ({results.length})
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10 }}>
+            {results.sort((a, b) => (a.page_number || 0) - (b.page_number || 0)).map((r, i) => (
+              <PageResultCard key={i} r={r} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20, paddingTop: 16, borderTop: BRAND.borderLight }}>
+        <button
+          onClick={onClose}
+          disabled={!isDone && !isError}
+          style={{
+            ...S.btn,
+            ...(isDone || isError ? S.btnPrimary : { background: BRAND.faint + '30', color: BRAND.faint, cursor: 'not-allowed' }),
+          }}
+        >
+          {isDone ? 'Done' : isError ? 'Close' : 'Processing…'}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+function PageResultCard({ r }) {
+  const ai = r.ai_suggestion || {}
+  const isTpl = r.is_template
+  const tone = isTpl ? BRAND.green : (r.classification === 'unknown' ? BRAND.red : BRAND.faint)
+  return (
+    <div style={{ border: BRAND.border, borderRadius: BRAND.radiusSm, overflow: 'hidden', background: BRAND.card }}>
+      <div style={{ height: 96, background: BRAND.sidebar, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+        {r.thumbnail_url
+          ? <img src={r.thumbnail_url} alt={'Page ' + r.page_number} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          : <span style={{ fontFamily: BRAND.mono, fontSize: 10, color: BRAND.faint }}>no thumb</span>}
+      </div>
+      <div style={{ padding: '8px 10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+          <span style={{ fontFamily: BRAND.mono, fontSize: 10, color: BRAND.faint }}>p.{r.page_number}</span>
+          <span style={{ fontFamily: BRAND.mono, fontSize: 9, padding: '1px 6px', borderRadius: BRAND.radiusXs, background: tone + '20', color: tone }}>
+            {r.classification}
+          </span>
+        </div>
+        <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.3, minHeight: 16 }}>
+          {ai.framework_name || (isTpl ? '(unnamed)' : '—')}
+        </div>
+        {r.has_match && (
+          <div style={{ fontFamily: BRAND.mono, fontSize: 9, color: BRAND.amber, marginTop: 3 }}>
+            ↻ matches existing
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function safeParse(s) { try { return JSON.parse(s) } catch { return [] } }
 
 // ── Inject keyframe animations ──
 if (typeof document !== 'undefined') {

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { BRAND, S } from '../brand'
-import { frameworks, enums } from '../api'
-import { StatusBadge, TagChip, Checkbox, Modal, Spinner, EmptyState, useToast } from '../components/ui'
+import { frameworks, enums, uploadTemplate, CLOUDINARY } from '../api'
+import { StatusBadge, TagChip, Checkbox, Modal, Spinner, EmptyState, useToast, JobProgressModal } from '../components/ui'
 
 const SORT_OPTS = [
   { v: 'name-asc', l: 'Name A→Z' },
@@ -43,7 +43,62 @@ export default function Frameworks() {
   const [saving, setSaving] = useState(false)
   const [tags, setTags] = useState([])
   const [counts, setCounts] = useState({})
+  const [activeJobId, setActiveJobId] = useState(null)
+  const [activeJobFile, setActiveJobFile] = useState(null)
   const { show: toast, Toast } = useToast()
+
+  // Open the Cloudinary upload widget; on success POST metadata to the
+  // template-process webhook and start the polling modal.
+  function openUploader() {
+    if (!window.cloudinary) {
+      toast('Cloudinary widget still loading — try again', 'error')
+      return
+    }
+    const widget = window.cloudinary.createUploadWidget(
+      {
+        cloudName: CLOUDINARY.cloudName,
+        uploadPreset: CLOUDINARY.uploadPreset,
+        sources: ['local', 'url'],
+        multiple: false,
+        clientAllowedFormats: ['pdf', 'pptx', 'ppt', 'png', 'jpg', 'jpeg', 'webp', 'svg'],
+        maxFileSize: 50 * 1024 * 1024,
+        folder: 'scrumvisuals/templates_raw',
+        styles: {
+          palette: {
+            window: BRAND.canvas, sourceBg: BRAND.sidebar, windowBorder: BRAND.borderColor,
+            tabIcon: BRAND.terracotta, inactiveTabIcon: BRAND.faint,
+            menuIcons: BRAND.muted, link: BRAND.terracotta, action: BRAND.terracotta,
+            inProgress: BRAND.terracotta, complete: BRAND.green, error: BRAND.red,
+            textDark: BRAND.ink, textLight: BRAND.canvas,
+          },
+        },
+      },
+      async (error, result) => {
+        if (error) {
+          toast((error.statusText || error.message) || 'Upload failed', 'error')
+          return
+        }
+        if (!result || result.event !== 'success') return
+        const info = result.info
+        const fileName = info.original_filename + '.' + info.format
+        try {
+          const job = await uploadTemplate({
+            cloudinary_public_id: info.public_id,
+            cloudinary_url: info.secure_url,
+            cloudinary_version: String(info.version),
+            source_file_name: fileName,
+            total_pages: info.pages || 1,
+          })
+          setActiveJobFile(fileName)
+          setActiveJobId(job.job_id)
+          toast(`Job #${job.job_id} created (${job.total_pages} page${job.total_pages === 1 ? '' : 's'})`)
+        } catch (err) {
+          toast(err.message || 'Failed to create job', 'error')
+        }
+      }
+    )
+    widget.open()
+  }
 
   // Load data
   async function loadData() {
@@ -177,7 +232,7 @@ export default function Frameworks() {
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={() => setShowConfig(true)} style={{ ...S.btn, background: 'transparent', color: BRAND.muted, border: BRAND.border }}>⚙ Config</button>
-            <button style={{ ...S.btn, ...S.btnOutline, opacity: 0.5, cursor: 'not-allowed' }} title="Requires Cloudinary setup">Upload PPT / PDF</button>
+            <button onClick={openUploader} style={{ ...S.btn, ...S.btnOutline }}>Upload PPT / PDF</button>
             <button onClick={openCreate} style={{ ...S.btn, ...S.btnPrimary }}>+ New</button>
           </div>
         </div>
@@ -424,6 +479,13 @@ export default function Frameworks() {
           </button>
         </div>
       </Modal>
+
+      <JobProgressModal
+        jobId={activeJobId}
+        fileName={activeJobFile}
+        onClose={() => { setActiveJobId(null); setActiveJobFile(null) }}
+        onComplete={() => loadData()}
+      />
 
       {/* Config slide-over — placeholder for now */}
       {showConfig && (

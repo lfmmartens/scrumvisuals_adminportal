@@ -2,8 +2,25 @@
 // All calls go to the single N8N webhook endpoint
 
 const API_URL = '/webhook/admin-api'
+const TEMPLATE_PROCESS_URL = '/webhook/admin-template-process'
 
 const API_KEY = 'AdminPortal2026Secure!'
+
+export const CLOUDINARY = {
+  cloudName: 'ddbbcyqjx',
+  uploadPreset: 'sv_admin_unsigned',
+}
+
+export async function uploadTemplate(meta) {
+  const res = await fetch(TEMPLATE_PROCESS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY },
+    body: JSON.stringify(meta),
+  })
+  const json = await res.json()
+  if (!json.success) throw new Error(json.error || json.message || 'Upload failed')
+  return json
+}
 
 async function api(entity, action, data = {}, filters = {}) {
   try {
