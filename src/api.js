@@ -8,7 +8,7 @@ const API_KEY = 'AdminPortal2026Secure!'
 
 export const CLOUDINARY = {
   cloudName: 'ddbbcyqjx',
-  uploadPreset: 'sv_admin_unsigned',
+  uploadPreset: 'sv_source_upload',
 }
 
 export async function uploadTemplate(meta) {
