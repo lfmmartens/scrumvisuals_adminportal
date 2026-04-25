@@ -1,0 +1,15 @@
+services:
+  admin-portal:
+    build: .
+    container_name: sv-admin-portal
+    ports:
+      - "3001:80"
+    networks:
+      - default
+      - scrumvisuals
+    restart: unless-stopped
+
+networks:
+  scrumvisuals:
+    name: scrumvisuals_scrumvisuals
+    external: true
