@@ -1,9 +1,7 @@
 // Admin Portal API Client
 // All calls go to the single N8N webhook endpoint
 
-const API_URL = import.meta.env.PROD
-  ? 'https://n8n.twentytwospices.com/webhook/admin-api'
-  : '/webhook/admin-api'
+const API_URL = '/webhook/admin-api'
 
 const API_KEY = 'AdminPortal2026Secure!'
 
